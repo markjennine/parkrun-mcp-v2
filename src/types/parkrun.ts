@@ -83,3 +83,12 @@ export interface AthleteVolunteerSummary {
   totalCredits: number;
   roles: VolunteerRoleSummary[];
 }
+
+export interface PacingRecord {
+  date: string;        // YYYY-MM-DD
+  eventName: string;
+  eventSlug: string;
+  runTime: string;     // athlete's recorded finish time
+  position: number;
+  pacerRole: string;   // e.g. "Pacer 25:00"
+}
