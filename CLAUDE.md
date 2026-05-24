@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-This project builds a **local MCP (Model Context Protocol) server** that exposes parkrun data to AI assistants such as Claude. The API is unofficial and reverse-engineered from the parkrun mobile app.
+This project builds a **local MCP (Model Context Protocol) server** that exposes parkrun data to AI assistants such as Claude. Data is scraped from the public parkrun website — **no authentication or API key is required**.
 
 The MCP server allows Claude (or any MCP-compatible client) to answer questions like:
 - "What was my last parkrun time?"
@@ -12,18 +12,19 @@ The MCP server allows Claude (or any MCP-compatible client) to answer questions 
 
 ---
 
-## Project Owner / Test Credentials
+## Project Owner / Test Values
 
-These values are used for all API testing. Do not hardcode them into production code — use environment variables or a config file.
+These values are used for all testing. Do not hardcode them into production code — use environment variables or a config file.
 
 | Field | Value |
 |---|---|
 | Name | Mark Thomas |
-| Runner number | A1708821 |
+| Barcode number | A1708821 |
+| Numeric athlete ID | 1708821 (same, drop the A) |
 | Home parkrun | FrimleyLodge |
 | Club | Windle Valley Runners |
 
-> **Always validate API calls using the above credentials before marking any task complete.**
+> **Always validate scraping against the above values before marking any task complete.**
 
 ---
 
@@ -36,19 +37,21 @@ Claude / MCP Client
 parkrun-mcp-v2 (MCP Server, local stdio transport)
        │
        ▼
-parkrun API (reverse-engineered, unofficial)
-  ├── auth.parkrun.com  — OAuth2 login / token refresh
-  ├── api.parkrun.com   — Athlete & run data (authenticated)
-  └── www.parkrun.org.uk — Public event/results pages (scraped)
+www.parkrun.org.uk  (public HTML pages — no auth needed)
+  ├── /parkrunner/{id}/all/              — Athlete run history
+  ├── /{event}/results/latestresults/    — Latest event results
+  ├── /{event}/results/{YYYY-MM-DD}/     — Results by date
+  ├── /{event}/results/eventhistory/     — All past events
+  └── /{event}/volunteer/futureroster/   — Upcoming volunteer roster
 ```
 
 ### Technology Stack
 
-- **Language**: TypeScript (Node.js)
-- **MCP SDK**: `@modelcontextprotocol/sdk`
-- **HTTP client**: `axios` with cookie/session support
-- **Auth**: OAuth2 password grant (parkrun uses auth.parkrun.com)
-- **Transport**: stdio (for local MCP use with Claude Desktop / Claude Code)
+- **Language:** TypeScript (Node.js)
+- **MCP SDK:** `@modelcontextprotocol/sdk`
+- **HTTP client:** `axios`
+- **HTML parser:** `cheerio` (jQuery-like HTML parsing, no headless browser needed)
+- **Transport:** stdio (for local MCP use with Claude Desktop / Claude Code)
 
 ---
 
@@ -61,73 +64,59 @@ parkrun-mcp-v2/
 ├── README.md              ← User-facing setup guide
 ├── package.json
 ├── tsconfig.json
-├── .env.example           ← Template for credentials
+├── .env.example
 ├── src/
 │   ├── index.ts           ← MCP server entry point
-│   ├── api/
-│   │   ├── auth.ts        ← Login / token management
-│   │   ├── athlete.ts     ← Athlete profile & run history
-│   │   ├── event.ts       ← Event results & details
-│   │   └── endpoints.ts   ← All API URL constants
+│   ├── scraper/
+│   │   ├── athlete.ts     ← Scrape athlete pages
+│   │   ├── event.ts       ← Scrape event results pages
+│   │   └── http.ts        ← Shared axios instance with UA header
 │   ├── tools/
-│   │   ├── athlete-tools.ts   ← MCP tool definitions for athlete data
-│   │   ├── event-tools.ts     ← MCP tool definitions for event data
-│   │   └── index.ts           ← Register all tools
+│   │   ├── athlete-tools.ts
+│   │   ├── event-tools.ts
+│   │   └── index.ts
 │   └── types/
-│       └── parkrun.ts     ← TypeScript types for API responses
+│       └── parkrun.ts     ← TypeScript interfaces
 ├── scripts/
-│   └── test-api.ts        ← Standalone API validation script
+│   └── test-scraper.ts    ← Standalone validation script
 └── docs/
-    └── api-endpoints.md   ← Discovered API endpoints reference
+    └── api-endpoints.md   ← Verified URL patterns & data reference
 ```
 
 ---
 
-## API Details (Reverse-Engineered)
+## Verified URL Patterns
 
-### Authentication
-
-parkrun uses **OAuth2 with Resource Owner Password Credentials** grant:
-
+### Athlete page (full history)
 ```
-POST https://auth.parkrun.com/auth/realms/parkrun/protocol/openid-connect/token
-Content-Type: application/x-www-form-urlencoded
-
-grant_type=password
-&username=A1708821
-&password=<password>
-&client_id=parkunner-website
+https://www.parkrun.org.uk/parkrunner/{numericId}/all/
 ```
+Example: `https://www.parkrun.org.uk/parkrunner/1708821/all/`
 
-Response includes `access_token` and `refresh_token` (JWT).
-
-Use `Authorization: Bearer <access_token>` on all subsequent API requests.
-
-### Key API Endpoints
-
-| Endpoint | Auth | Description |
-|---|---|---|
-| `GET https://api.parkrun.com/v1/me` | ✅ | Authenticated user profile |
-| `GET https://api.parkrun.com/v1/me/results` | ✅ | Run results for logged-in user |
-| `GET https://api.parkrun.com/v1/athletes/{id}` | ✅ | Athlete profile by ID |
-| `GET https://api.parkrun.com/v1/athletes/{id}/results` | ✅ | Run history for athlete |
-| `GET https://api.parkrun.com/v1/events` | ❌ | All events |
-| `GET https://api.parkrun.com/v1/events/{eventName}/results` | ❌ | Event results |
-| `GET https://api.parkrun.com/v1/events/{eventName}/results/latest` | ❌ | Latest results for event |
-
-> **Note:** The numeric athlete ID differs from the barcode number (e.g. `A1708821`). The numeric ID is obtained from the profile endpoint after authentication.
-
-### Public Scraping Fallback
-
-Some data is available without auth via the parkrun website:
-
+### Latest event results
 ```
-https://www.parkrun.org.uk/parkrunner/{athleteId}/all/
-https://www.parkrun.org.uk/{eventName}/results/
-https://www.parkrun.org.uk/{eventName}/results/latest/
+https://www.parkrun.org.uk/{eventSlug}/results/latestresults/
+```
+Example: `https://www.parkrun.org.uk/frimleylodge/results/latestresults/`
+→ Redirects to: `https://www.parkrun.org.uk/frimleylodge/results/2026-05-23`
+
+### Results by date
+```
+https://www.parkrun.org.uk/{eventSlug}/results/{YYYY-MM-DD}/
 ```
 
-These require a browser-like User-Agent and may require cookies.
+### Event history index
+```
+https://www.parkrun.org.uk/{eventSlug}/results/eventhistory/
+```
+
+### Future volunteer roster
+```
+https://www.parkrun.org.uk/{eventSlug}/volunteer/futureroster/
+```
+
+**Both athlete and event pages confirmed working. No login required.**  
+See `docs/api-endpoints.md` for full data field reference.
 
 ---
 
@@ -135,26 +124,25 @@ These require a browser-like User-Agent and may require cookies.
 
 | Tool Name | Description |
 |---|---|
-| `get_athlete_profile` | Get name, run count, home run, club for an athlete |
-| `get_athlete_results` | Get run history (all or N most recent) for an athlete |
-| `get_my_profile` | Get profile for the configured default athlete |
-| `get_my_results` | Get results for the configured default athlete |
-| `get_event_latest_results` | Get most recent results for a named parkrun event |
-| `get_event_results_by_date` | Get results for a specific date and event |
-| `search_events` | Search for parkrun events by name or location |
+| `get_athlete_results` | Full run history for any athlete by ID |
+| `get_my_results` | Run history for the configured default athlete |
+| `get_event_latest_results` | Most recent results for a named event |
+| `get_event_results_by_date` | Results for a specific date and event |
+| `get_event_history` | Index of all past events for an event |
+| `get_volunteer_roster` | Upcoming volunteer slots for an event |
 
 ---
 
 ## Development Rules
 
-1. **Always test API calls with real credentials before committing.** Use `A1708821` / FrimleyLodge as the baseline.
-2. **Never commit credentials to the repo.** Use `.env` and `.gitignore`.
-3. **Validate API responses match expected schema** before building tool logic on top.
-4. **Document every discovered endpoint** in `docs/api-endpoints.md` with: URL, method, auth required, request params, and a real response example.
-5. **Token caching**: Store tokens in memory during a session; implement refresh before expiry.
-6. **Handle HTTP errors gracefully**: 401 → re-auth, 404 → not found, 429 → rate limit.
-7. **TypeScript strict mode** is enabled — no `any` without justification.
-8. Use `zod` for runtime validation of API responses.
+1. **Test scraping with real URLs before committing.** Use `1708821` / `frimleylodge` as baseline.
+2. **Never hardcode athlete IDs or event names.** Use env vars or config.
+3. **Set a browser-like User-Agent** on all HTTP requests — required for parkrun pages.
+4. **Follow redirects** — `/latestresults/` redirects to the dated URL; axios does this automatically.
+5. **Parse the initial HTML only** — all data is in server-rendered HTML, no JS execution needed.
+6. **TypeScript strict mode** enabled — no `any` without justification.
+7. **Handle errors gracefully:** 404 (event/athlete not found), network timeouts, HTML structure changes.
+8. **Be conservative with requests** — cache responses where sensible; don't hammer the site.
 
 ---
 
@@ -163,41 +151,29 @@ These require a browser-like User-Agent and may require cookies.
 ```bash
 npm install
 cp .env.example .env
-# Fill in PARKRUN_USERNAME and PARKRUN_PASSWORD in .env
+# Edit .env with your preferred default event and athlete ID
 
-# Run the API test script to validate all endpoints
-npx ts-node scripts/test-api.ts
+# Validate scraping works
+npx ts-node scripts/test-scraper.ts
 
-# Start the MCP server (stdio mode)
+# Start the MCP server
 npm start
 ```
 
 ### Environment Variables
 
 ```
-PARKRUN_USERNAME=A1708821
-PARKRUN_PASSWORD=<your password>
-PARKRUN_DEFAULT_EVENT=FrimleyLodge
-PARKRUN_DEFAULT_ATHLETE_ID=<numeric ID from profile endpoint>
+PARKRUN_DEFAULT_ATHLETE_ID=1708821
+PARKRUN_DEFAULT_EVENT=frimleylodge
 ```
-
----
-
-## Important Caveats
-
-- This is **unofficial** and Parkrun's API can change without notice.
-- The API programme is officially on hold (as per parkrun.com/api).
-- Rate limiting may apply — be conservative with requests.
-- Some endpoints (e.g. freedom runs) can only be accessed for the authenticated user.
-- Parkrun athlete IDs use two formats: barcode format (`A1708821`) and numeric (obtained via API).
 
 ---
 
 ## Phase Completion Checklist
 
-- [ ] Phase 1: API reverse engineering & validation
-- [ ] Phase 2: Auth module with token management
-- [ ] Phase 3: API client modules (athlete, event)
+- [x] Phase 1: URL discovery & validation (both athlete and event pages confirmed ✅)
+- [ ] Phase 2: Project setup (package.json, tsconfig, deps)
+- [ ] Phase 3: Scraper modules (athlete.ts, event.ts)
 - [ ] Phase 4: MCP server with tool definitions
 - [ ] Phase 5: Integration testing with Claude Desktop
 - [ ] Phase 6: README & documentation
