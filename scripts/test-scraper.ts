@@ -8,7 +8,7 @@
  */
 
 import 'dotenv/config';
-import { scrapeAthleteHistory } from '../src/scraper/athlete';
+import { scrapeAthleteHistory, scrapeAthleteVolunteerSummary } from '../src/scraper/athlete';
 import {
   scrapeLatestResults,
   scrapeResultsByDate,
@@ -74,6 +74,14 @@ async function run(): Promise<void> {
     const roster = await scrapeVolunteerRoster(EVENT_SLUG);
     // Roster may be empty if no future events are scheduled
     console.log(`  -> ${roster.length} upcoming dates in roster`);
+  });
+
+  await test('scrapeAthleteVolunteerSummary', async () => {
+    const summary = await scrapeAthleteVolunteerSummary(ATHLETE_ID);
+    assert(summary.name.toLowerCase().includes(EXPECTED_NAME.toLowerCase()), `name should contain "${EXPECTED_NAME}", got "${summary.name}"`);
+    assert(summary.totalCredits > 0, `totalCredits should be > 0, got ${summary.totalCredits}`);
+    assert(summary.roles.length > 0, 'roles array should not be empty');
+    console.log(`  -> ${summary.name}, ${summary.totalCredits} volunteer credits, ${summary.roles.length} roles`);
   });
 
   console.log(`\n${'='.repeat(50)}`);

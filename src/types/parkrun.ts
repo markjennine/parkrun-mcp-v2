@@ -71,3 +71,15 @@ export interface VolunteerRosterDate {
   date: string;
   roles: Array<{ role: string; name: string }>;
 }
+
+export interface VolunteerRoleSummary {
+  role: string;
+  occasions: number;
+}
+
+export interface AthleteVolunteerSummary {
+  athleteId: string;
+  name: string;
+  totalCredits: number;
+  roles: VolunteerRoleSummary[];
+}

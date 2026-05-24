@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
-import { scrapeAthleteHistory } from '../scraper/athlete.js';
+import { scrapeAthleteHistory, scrapeAthleteVolunteerSummary } from '../scraper/athlete.js';
 
 const DEFAULT_ATHLETE_ID = process.env.PARKRUN_DEFAULT_ATHLETE_ID ?? '';
 
@@ -18,6 +18,19 @@ function formatAthleteHistory(
       (r) =>
         `  ${r.date}  ${r.eventName.padEnd(20)}  ${r.time}  Pos ${r.position}${r.isPB ? '  *** PB ***' : ''}`
     ),
+  ];
+  return lines.join('\n');
+}
+
+function formatVolunteerSummary(
+  summary: Awaited<ReturnType<typeof scrapeAthleteVolunteerSummary>>
+): string {
+  const lines = [
+    `Athlete: ${summary.name} (ID: ${summary.athleteId})`,
+    `Total volunteer credits: ${summary.totalCredits}`,
+    '',
+    'Volunteer roles:',
+    ...summary.roles.map((r) => `  ${r.role.padEnd(30)} ${r.occasions} occasion${r.occasions === 1 ? '' : 's'}`),
   ];
   return lines.join('\n');
 }
@@ -61,6 +74,28 @@ export const athleteTools: Tool[] = [
       required: ['athleteId'],
     },
   },
+  {
+    name: 'get_my_volunteer_history',
+    description:
+      'Get the volunteering history for the configured default athlete. Returns a summary of volunteer roles and total credits.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'get_volunteer_history',
+    description:
+      'Get the volunteering history for any parkrun athlete by their numeric ID. Returns a summary of volunteer roles and total credits.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        athleteId: {
+          type: 'string',
+          description:
+            'Numeric parkrun athlete ID (e.g. "1708821"). Same as barcode without the leading A.',
+        },
+      },
+      required: ['athleteId'],
+    },
+  },
 ];
 
 export async function handleAthleteTool(
@@ -82,6 +117,20 @@ export async function handleAthleteTool(
       .parse(args);
     const history = await scrapeAthleteHistory(athleteId);
     return formatAthleteHistory(history, limit ?? 10);
+  }
+
+  if (toolName === 'get_my_volunteer_history') {
+    if (!DEFAULT_ATHLETE_ID) {
+      return 'PARKRUN_DEFAULT_ATHLETE_ID is not set. Please add it to your .env file.';
+    }
+    const summary = await scrapeAthleteVolunteerSummary(DEFAULT_ATHLETE_ID);
+    return formatVolunteerSummary(summary);
+  }
+
+  if (toolName === 'get_volunteer_history') {
+    const { athleteId } = z.object({ athleteId: z.string() }).parse(args);
+    const summary = await scrapeAthleteVolunteerSummary(athleteId);
+    return formatVolunteerSummary(summary);
   }
 
   throw new Error(`Unknown athlete tool: ${toolName}`);

@@ -2,8 +2,10 @@ import * as cheerio from 'cheerio';
 import http from './http';
 import type {
   AthleteHistory,
+  AthleteVolunteerSummary,
   RunRecord,
   EventSummaryEntry,
+  VolunteerRoleSummary,
 } from '../types/parkrun';
 
 /**
@@ -62,4 +64,36 @@ export async function scrapeAthleteHistory(
   const eventSummary: EventSummaryEntry[] = [];
 
   return { athleteId, name, totalRuns, runs, eventSummary };
+}
+
+/**
+ * Scrape volunteer summary for an athlete.
+ * URL: https://www.parkrun.org.uk/parkrunner/{athleteId}/
+ */
+export async function scrapeAthleteVolunteerSummary(
+  athleteId: string
+): Promise<AthleteVolunteerSummary> {
+  const url = `/parkrunner/${athleteId}/`;
+  const { data: html } = await http.get<string>(url);
+  const $ = cheerio.load(html);
+
+  const nameRaw = $('h2').first().contents().filter((_i, el) => el.type === 'text').first().text().trim();
+  const name = nameRaw || $('h2').first().text().replace(/\(A?\d+\)/g, '').trim();
+
+  // Select the table that follows the #volunteer-summary heading
+  const volunteerTable = $('#volunteer-summary').next('table');
+
+  const roles: VolunteerRoleSummary[] = [];
+  volunteerTable.find('tbody tr').each((_i, row) => {
+    const cells = $(row).find('td');
+    if (cells.length < 2) return;
+    const role = cells.eq(0).text().trim();
+    const occasions = parseInt(cells.eq(1).text().trim(), 10) || 0;
+    if (role) roles.push({ role, occasions });
+  });
+
+  const totalCreditsText = volunteerTable.find('tfoot td').last().text().trim();
+  const totalCredits = parseInt(totalCreditsText, 10) || 0;
+
+  return { athleteId, name, totalCredits, roles };
 }
