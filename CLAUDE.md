@@ -60,7 +60,6 @@ www.parkrun.org.uk  (public HTML pages — no auth needed)
 ```
 parkrun-mcp-v2/
 ├── CLAUDE.md              ← This file
-├── PLAN.md                ← Implementation plan
 ├── README.md              ← User-facing setup guide
 ├── package.json
 ├── tsconfig.json
@@ -171,14 +170,3 @@ PARKRUN_DEFAULT_EVENT=frimleylodge
 
 ---
 
-## Phase Completion Checklist
-
-- [x] Phase 1: URL discovery & validation (both athlete and event pages confirmed ✅)
-- [x] Phase 2: Project setup (package.json, tsconfig, deps, .env.example, .gitignore)
-- [x] Phase 3: Scraper modules (athlete.ts, event.ts, http.ts)
-- [x] Phase 4: TypeScript types (parkrun.ts)
-- [x] Phase 5: MCP tool definitions (athlete-tools.ts, event-tools.ts)
-- [x] Phase 6: MCP server entry point (index.ts)
-- [x] Phase 7: Validation script (scripts/test-scraper.ts)
-- [ ] Phase 8: Integration testing with Claude Desktop — run `npm run test:scraper` first
-- [ ] Phase 9: Selector verification — CSS selectors in scraper may need tuning against live HTML
