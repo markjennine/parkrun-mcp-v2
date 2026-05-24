@@ -1,2 +1,2 @@
-export { athleteTools, handleAthleteTool } from './athlete-tools.js';
-export { eventTools, handleEventTool } from './event-tools.js';
+export { athleteTools, handleAthleteTool } from './athlete-tools';
+export { eventTools, handleEventTool } from './event-tools';

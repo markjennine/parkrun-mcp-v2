@@ -44,7 +44,7 @@ function assert(condition: boolean, msg: string): void {
 async function run(): Promise<void> {
   await test('scrapeAthleteHistory', async () => {
     const history = await scrapeAthleteHistory(ATHLETE_ID);
-    assert(history.name.includes(EXPECTED_NAME), `name should contain "${EXPECTED_NAME}", got "${history.name}"`);
+    assert(history.name.toLowerCase().includes(EXPECTED_NAME.toLowerCase()), `name should contain "${EXPECTED_NAME}", got "${history.name}"`);
     assert(history.totalRuns > 0, `totalRuns should be > 0, got ${history.totalRuns}`);
     assert(history.runs.length > 0, 'runs array should not be empty');
     console.log(`  -> ${history.name}, ${history.totalRuns} total runs`);

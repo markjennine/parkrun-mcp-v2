@@ -10,7 +10,7 @@ import {
   eventTools,
   handleAthleteTool,
   handleEventTool,
-} from './tools/index.js';
+} from './tools/index';
 
 const server = new Server(
   { name: 'parkrun-mcp', version: '1.0.0' },

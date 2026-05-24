@@ -1,12 +1,12 @@
 import * as cheerio from 'cheerio';
-import http from './http.js';
+import http from './http';
 import type {
   EventResults,
   EventHistoryEntry,
   VolunteerRosterDate,
   Finisher,
   Volunteer,
-} from '../types/parkrun.js';
+} from '../types/parkrun';
 
 /** Parse the shared results page HTML into an EventResults object. */
 function parseResultsPage(
@@ -15,80 +15,57 @@ function parseResultsPage(
 ): EventResults {
   const $ = cheerio.load(html);
 
-  // Event name and date from page header
-  const headerText = $('h1, h2').first().text().trim();
-  const eventName = headerText.split('\n')[0].trim();
+  const eventName = $('h1').first().text().trim();
 
-  // Date: parkrun sets a <span class="format-date"> or the URL contains it
-  const dateSpan = $('[class*="date"]').first().text().trim();
-  // Fallback: extract from canonical link
-  const canonical = $('link[rel="canonical"]').attr('href') ?? '';
-  const dateMatch = canonical.match(/(\d{4}-\d{2}-\d{2})/);
-  const date = dateSpan || (dateMatch ? dateMatch[1] : '');
+  // Date is in <span class="format-date">2026-05-23</span>
+  const date = $('.format-date').first().text().trim();
 
   // Event number from text like "Event 778"
   const eventNumMatch = $('body').text().match(/[Ee]vent\s+#?(\d+)/);
   const eventNumber = eventNumMatch ? parseInt(eventNumMatch[1], 10) : 0;
 
-  // Finishers table
+  // Finishers: each <tr class="Results-table-row"> has data-* attributes
   const finishers: Finisher[] = [];
-  $('#results tbody tr').each((_i, row) => {
-    const cells = $(row).find('td');
-    if (cells.length < 10) return;
+  $('tr.Results-table-row').each((_i, row) => {
+    const $row = $(row);
+    const name = $row.attr('data-name') ?? '';
+    if (!name) return;
 
-    const position = parseInt(cells.eq(0).text().trim(), 10) || 0;
-    const nameLink = cells.eq(1).find('a');
-    const name = nameLink.text().trim();
+    const position = parseInt($row.attr('data-position') ?? '0', 10) || 0;
+    const gender = $row.attr('data-gender') ?? '';
+    const totalFinishes = parseInt($row.attr('data-runs') ?? '0', 10) || 0;
+    const ageGroup = $row.attr('data-agegroup') ?? '';
+    const club = $row.attr('data-club') ?? '';
+    const ageGradeStr = ($row.attr('data-agegrade') ?? '').replace('%', '');
+    const ageGrade = parseFloat(ageGradeStr) || 0;
+    const pbStatus = $row.attr('data-achievement') ?? '';
+
+    const nameLink = $row.find('.Results-table-td--name a').first();
     const href = nameLink.attr('href') ?? '';
     const idMatch = href.match(/(\d+)$/);
     const athleteId = idMatch ? idMatch[1] : '';
-    const totalFinishes = parseInt(cells.eq(2).text().trim(), 10) || 0;
 
-    const genderText = cells.eq(3).text().trim(); // e.g. "Male 12/366"
-    const genderParts = genderText.split(' ');
-    const gender = genderParts[0] ?? '';
-    const genderPos = parseInt((genderParts[1] ?? '0').split('/')[0], 10) || 0;
+    const time = $row.find('.Results-table-td--time .compact').text().trim();
 
-    const milestones: string[] = [];
-    cells.eq(4).find('img, span').each((_j, el) => {
-      const alt = $(el).attr('alt') ?? $(el).text();
-      if (alt) milestones.push(alt.trim());
+    finishers.push({
+      position, name, athleteId, totalFinishes, gender,
+      genderPosition: 0, milestones: [], ageGroup, ageGrade,
+      club, time, pbStatus, isFirstTimer: false,
     });
-
-    const ageGroup = cells.eq(5).text().trim();
-    const ageGrade = parseFloat(cells.eq(6).text().replace('%', '').trim()) || 0;
-    const club = cells.eq(7).find('a').text().trim() || cells.eq(7).text().trim();
-    const time = cells.eq(8).text().trim();
-    const pbStatus = cells.eq(9).text().trim();
-    const isFirstTimer = cells.eq(10)?.text().toLowerCase().includes('first') ?? false;
-
-    if (name) {
-      finishers.push({
-        position, name, athleteId, totalFinishes, gender,
-        genderPosition: genderPos, milestones, ageGroup, ageGrade,
-        club, time, pbStatus, isFirstTimer,
-      });
-    }
   });
 
-  // Volunteers table (second #results table or a table further down)
+  // Volunteers: each <tr class="Volunteers-table-row"> has data-* attributes
   const volunteers: Volunteer[] = [];
-  $('table').each((_i, table) => {
-    const rows = $(table).find('tbody tr');
-    // Identify the volunteer table by header text containing "Volunteer"
-    const headerRow = $(table).find('thead th').first().text().toLowerCase();
-    if (!headerRow.includes('volunteer') && !headerRow.includes('role')) return;
-    rows.each((_j, row) => {
-      const cells = $(row).find('td');
-      if (cells.length < 2) return;
-      const nameLink = cells.eq(0).find('a');
-      const name = nameLink.text().trim();
-      const href = nameLink.attr('href') ?? '';
-      const idMatch = href.match(/(\d+)$/);
-      const athleteId = idMatch ? idMatch[1] : '';
-      const role = cells.eq(1).text().trim();
-      if (name) volunteers.push({ name, athleteId, role });
-    });
+  $('tr.Volunteers-table-row').each((_i, row) => {
+    const $row = $(row);
+    const name = $row.attr('data-name') ?? '';
+    if (!name) return;
+    const role = ($row.attr('data-role') ?? '').replace(/,$/, '').trim();
+    const nameLink = $row.find('a').first();
+    const href = nameLink.attr('href') ?? '';
+    const idMatch = href.match(/(\d+)$/);
+    const athleteId = idMatch ? idMatch[1] : '';
+    volunteers.push({ name, athleteId, role });
   });
 
   return {

@@ -1,10 +1,10 @@
 import * as cheerio from 'cheerio';
-import http from './http.js';
+import http from './http';
 import type {
   AthleteHistory,
   RunRecord,
   EventSummaryEntry,
-} from '../types/parkrun.js';
+} from '../types/parkrun';
 
 /**
  * Scrape full run history for an athlete.
@@ -17,54 +17,49 @@ export async function scrapeAthleteHistory(
   const { data: html } = await http.get<string>(url);
   const $ = cheerio.load(html);
 
-  // Runner name — typically in an <h2> or page <title>
-  const name =
-    $('h2.Athletics-profile--name').first().text().trim() ||
-    $('h2').first().text().trim() ||
-    $('title').text().split('|')[0].trim();
+  // Name is in <h2>Mark THOMAS <span>(A1708821)</span></h2>
+  // Extract just the text node before the span (the actual name)
+  const nameRaw = $('h2').first().contents().filter((_i, el) => el.type === 'text').first().text().trim();
+  const name = nameRaw || $('h2').first().text().replace(/\(A?\d+\)/g, '').trim();
 
-  // Run history table
+  // Run history is in the table captioned "All Results"
+  // Columns: Event(0), Run Date(1), Run Number/Event#(2), Pos(3), Time(4), Age Grade(5), PB?(6)
   const runs: RunRecord[] = [];
-  $('table#results tbody tr').each((_i, row) => {
-    const cells = $(row).find('td');
-    if (cells.length < 9) return;
 
-    const date = cells.eq(0).text().trim();
-    const eventLink = cells.eq(1).find('a');
+  const allResultsTable = $('table').filter((_i, el) => {
+    const captionText = $(el).find('caption').text();
+    return captionText.includes('All') && captionText.includes('Results');
+  }).first();
+
+  allResultsTable.find('tbody tr').each((_i, row) => {
+    const cells = $(row).find('td');
+    if (cells.length < 6) return;
+
+    const eventLink = cells.eq(0).find('a');
     const eventName = eventLink.text().trim();
     const eventHref = eventLink.attr('href') ?? '';
-    const eventSlug = eventHref.split('/').filter(Boolean)[0] ?? '';
-    const time = cells.eq(2).text().trim();
+    const eventSlug = eventHref.replace('https://www.parkrun.org.uk/', '').split('/').filter(Boolean)[0] ?? '';
+
+    const dateEl = cells.eq(1).find('.format-date');
+    const dateRaw = dateEl.text().trim() || cells.eq(1).text().trim();
+    // Convert DD/MM/YYYY to YYYY-MM-DD
+    const dateParts = dateRaw.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+    const date = dateParts ? `${dateParts[3]}-${dateParts[2]}-${dateParts[1]}` : dateRaw;
+
+    const runNumber = parseInt(cells.eq(2).text().trim(), 10) || 0;
     const position = parseInt(cells.eq(3).text().trim(), 10) || 0;
-    const genderPosition = parseInt(cells.eq(4).text().trim(), 10) || 0;
+    const time = cells.eq(4).text().trim();
     const ageGrade = parseFloat(cells.eq(5).text().replace('%', '').trim()) || 0;
-    const pbCell = cells.eq(6).text().trim().toLowerCase();
-    const isPB = pbCell.includes('pb') || pbCell.includes('best');
-    const runNumber = parseInt(cells.eq(7).text().trim(), 10) || 0;
+    const pbText = (cells.length > 6 ? cells.eq(6).text() : '').trim().toLowerCase();
+    const isPB = pbText.includes('pb') || pbText.includes('best') || pbText === 'yes';
 
     if (date && eventName) {
-      runs.push({ date, eventName, eventSlug, time, position, genderPosition, ageGrade, isPB, runNumber });
+      runs.push({ date, eventName, eventSlug, time, position, genderPosition: 0, ageGrade, isPB, runNumber });
     }
   });
 
   const totalRuns = runs.length;
-
-  // Event summary table (second table on page)
   const eventSummary: EventSummaryEntry[] = [];
-  $('table').eq(1).find('tbody tr').each((_i, row) => {
-    const cells = $(row).find('td');
-    if (cells.length < 4) return;
-    const eventLink = cells.eq(0).find('a');
-    const eventName = eventLink.text().trim();
-    const eventHref = eventLink.attr('href') ?? '';
-    const eventSlug = eventHref.split('/').filter(Boolean)[0] ?? '';
-    const runCount = parseInt(cells.eq(1).text().trim(), 10) || 0;
-    const bestTime = cells.eq(2).text().trim();
-    const firstRunDate = cells.eq(3).text().trim();
-    if (eventName) {
-      eventSummary.push({ eventName, eventSlug, runCount, bestTime, firstRunDate });
-    }
-  });
 
   return { athleteId, name, totalRuns, runs, eventSummary };
 }
