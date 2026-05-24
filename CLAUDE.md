@@ -5,10 +5,10 @@
 This project builds a **local MCP (Model Context Protocol) server** that exposes parkrun data to AI assistants such as Claude. Data is scraped from the public parkrun website — **no authentication or API key is required**.
 
 The MCP server allows Claude (or any MCP-compatible client) to answer questions like:
-- "What was my last parkrun time?"
-- "How many parkruns have I done at FrimleyLodge?"
-- "What are the latest results for FrimleyLodge parkrun?"
-- "Who are the volunteers at my home run this Saturday?"
+- “What was my last parkrun time?”
+- “How many parkruns have I done at FrimleyLodge?”
+- “What are the latest results for FrimleyLodge parkrun?”
+- “Who are the volunteers at my home run this Saturday?”
 
 ---
 
@@ -65,6 +65,7 @@ parkrun-mcp-v2/
 ├── package.json
 ├── tsconfig.json
 ├── .env.example
+├── .gitignore
 ├── src/
 │   ├── index.ts           ← MCP server entry point
 │   ├── scraper/
@@ -120,7 +121,7 @@ See `docs/api-endpoints.md` for full data field reference.
 
 ---
 
-## MCP Tools (Planned)
+## MCP Tools
 
 | Tool Name | Description |
 |---|---|
@@ -142,7 +143,8 @@ See `docs/api-endpoints.md` for full data field reference.
 5. **Parse the initial HTML only** — all data is in server-rendered HTML, no JS execution needed.
 6. **TypeScript strict mode** enabled — no `any` without justification.
 7. **Handle errors gracefully:** 404 (event/athlete not found), network timeouts, HTML structure changes.
-8. **Be conservative with requests** — cache responses where sensible; don't hammer the site.
+8. **Be conservative with requests** — cache responses where sensible; don’t hammer the site.
+9. **stdout is reserved for MCP protocol.** Use `process.stderr` for all logging in `src/index.ts`.
 
 ---
 
@@ -154,7 +156,7 @@ cp .env.example .env
 # Edit .env with your preferred default event and athlete ID
 
 # Validate scraping works
-npx ts-node scripts/test-scraper.ts
+npm run test:scraper
 
 # Start the MCP server
 npm start
@@ -172,8 +174,11 @@ PARKRUN_DEFAULT_EVENT=frimleylodge
 ## Phase Completion Checklist
 
 - [x] Phase 1: URL discovery & validation (both athlete and event pages confirmed ✅)
-- [ ] Phase 2: Project setup (package.json, tsconfig, deps)
-- [ ] Phase 3: Scraper modules (athlete.ts, event.ts)
-- [ ] Phase 4: MCP server with tool definitions
-- [ ] Phase 5: Integration testing with Claude Desktop
-- [ ] Phase 6: README & documentation
+- [x] Phase 2: Project setup (package.json, tsconfig, deps, .env.example, .gitignore)
+- [x] Phase 3: Scraper modules (athlete.ts, event.ts, http.ts)
+- [x] Phase 4: TypeScript types (parkrun.ts)
+- [x] Phase 5: MCP tool definitions (athlete-tools.ts, event-tools.ts)
+- [x] Phase 6: MCP server entry point (index.ts)
+- [x] Phase 7: Validation script (scripts/test-scraper.ts)
+- [ ] Phase 8: Integration testing with Claude Desktop — run `npm run test:scraper` first
+- [ ] Phase 9: Selector verification — CSS selectors in scraper may need tuning against live HTML
