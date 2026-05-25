@@ -32,6 +32,7 @@ async function fetchAllEvents(): Promise<ParkrunEvent[]> {
     longitude: f.geometry.coordinates[0],
     latitude: f.geometry.coordinates[1],
     countryCode: f.properties.countrycode,
+    isJunior: f.properties.eventname.includes('junior'),
   }));
 
   return cachedEvents;
@@ -48,10 +49,11 @@ function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): nu
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-export async function searchEventByName(query: string): Promise<ParkrunEvent[]> {
+export async function searchEventByName(query: string, includeJunior = false): Promise<ParkrunEvent[]> {
   const events = await fetchAllEvents();
   const q = query.toLowerCase().trim();
-  return events.filter(
+  const pool = includeJunior ? events : events.filter((e) => !e.isJunior);
+  return pool.filter(
     (e) =>
       e.eventSlug.includes(q) ||
       e.longName.toLowerCase().includes(q) ||
@@ -63,10 +65,12 @@ export async function searchEventByName(query: string): Promise<ParkrunEvent[]> 
 export async function findNearestEvents(
   latitude: number,
   longitude: number,
-  limit: number
+  limit: number,
+  includeJunior = false
 ): Promise<Array<{ event: ParkrunEvent; distanceKm: number }>> {
   const events = await fetchAllEvents();
-  return events
+  const pool = includeJunior ? events : events.filter((e) => !e.isJunior);
+  return pool
     .map((event) => ({
       event,
       distanceKm: haversineKm(latitude, longitude, event.latitude, event.longitude),

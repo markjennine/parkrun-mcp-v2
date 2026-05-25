@@ -94,6 +94,7 @@ export interface ParkrunEvent {
   latitude: number;
   longitude: number;
   countryCode: number;
+  isJunior: boolean;
 }
 
 export interface PacingRecord {

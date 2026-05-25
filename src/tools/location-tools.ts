@@ -35,6 +35,10 @@ export const locationTools: Tool[] = [
           type: 'string',
           description: 'Event name or partial name to search for (e.g. "frimleylodge", "Bushy", "Wigan").',
         },
+        includeJunior: {
+          type: 'boolean',
+          description: 'Include junior parkrun events (2km, held on Sunday mornings) in results. Defaults to false.',
+        },
       },
       required: ['query'],
     },
@@ -62,6 +66,10 @@ export const locationTools: Tool[] = [
           minimum: 1,
           maximum: 20,
         },
+        includeJunior: {
+          type: 'boolean',
+          description: 'Include junior parkrun events (2km, held on Sunday mornings) in results. Defaults to false.',
+        },
       },
       required: ['latitude', 'longitude'],
     },
@@ -73,8 +81,8 @@ export async function handleLocationTool(
   args: Record<string, unknown>
 ): Promise<string> {
   if (toolName === 'search_event_location') {
-    const { query } = z.object({ query: z.string() }).parse(args);
-    const results = await searchEventByName(query);
+    const { query, includeJunior } = z.object({ query: z.string(), includeJunior: z.boolean().optional() }).parse(args);
+    const results = await searchEventByName(query, includeJunior ?? false);
     if (results.length === 0) {
       return `No parkrun events found matching "${query}".`;
     }
@@ -93,14 +101,15 @@ export async function handleLocationTool(
   }
 
   if (toolName === 'get_nearest_events') {
-    const { latitude, longitude, limit } = z
+    const { latitude, longitude, limit, includeJunior } = z
       .object({
         latitude: z.number(),
         longitude: z.number(),
         limit: z.number().min(1).max(20).optional(),
+        includeJunior: z.boolean().optional(),
       })
       .parse(args);
-    const results = await findNearestEvents(latitude, longitude, limit ?? 5);
+    const results = await findNearestEvents(latitude, longitude, limit ?? 5, includeJunior ?? false);
     const lines = [`Nearest parkrun events to ${latitude.toFixed(4)}, ${longitude.toFixed(4)}:\n`];
     for (const { event: e, distanceKm } of results) {
       lines.push(`${e.longName} — ${distanceKm.toFixed(1)} km`);
