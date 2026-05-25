@@ -8,6 +8,7 @@ export interface RunRecord {
   ageGrade: number;       // percentage, e.g. 59.29
   isPB: boolean;
   runNumber: number;      // cumulative run number for this athlete
+  isJunior: boolean;      // true for junior parkrun events (slug contains "juniors")
 }
 
 export interface EventSummaryEntry {

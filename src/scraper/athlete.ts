@@ -56,7 +56,8 @@ export async function scrapeAthleteHistory(
     const isPB = pbText.includes('pb') || pbText.includes('best') || pbText === 'yes';
 
     if (date && eventName) {
-      runs.push({ date, eventName, eventSlug, time, position, genderPosition: 0, ageGrade, isPB, runNumber });
+      const isJunior = eventSlug.includes('junior');
+      runs.push({ date, eventName, eventSlug, time, position, genderPosition: 0, ageGrade, isPB, runNumber, isJunior });
     }
   });
 

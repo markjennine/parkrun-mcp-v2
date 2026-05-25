@@ -1,14 +1,17 @@
 import { z } from 'zod';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { scrapeAthleteHistory, scrapeAthleteVolunteerSummary } from '../scraper/athlete.js';
+import { scrapeResultsByDate } from '../scraper/event.js';
 
 const DEFAULT_ATHLETE_ID = process.env.PARKRUN_DEFAULT_ATHLETE_ID ?? '';
 
 function formatAthleteHistory(
   history: Awaited<ReturnType<typeof scrapeAthleteHistory>>,
-  limit?: number
+  limit?: number,
+  includeJunior = false
 ): string {
-  const runs = limit ? history.runs.slice(0, limit) : history.runs;
+  const filtered = includeJunior ? history.runs : history.runs.filter((r) => !r.isJunior);
+  const runs = limit ? filtered.slice(0, limit) : filtered;
   const lines = [
     `Athlete: ${history.name} (ID: ${history.athleteId})`,
     `Total runs: ${history.totalRuns}`,
@@ -30,20 +33,28 @@ function timeToSeconds(time: string): number {
 }
 
 function formatPersonalBest(
-  history: Awaited<ReturnType<typeof scrapeAthleteHistory>>
+  history: Awaited<ReturnType<typeof scrapeAthleteHistory>>,
+  includeJunior = false,
+  pbContext?: { position: number; fieldSize: number }
 ): string {
-  if (history.runs.length === 0) {
+  const runs = includeJunior ? history.runs : history.runs.filter((r) => !r.isJunior);
+  if (runs.length === 0) {
     return `No runs found for athlete ${history.athleteId}.`;
   }
-  const best = history.runs.reduce((a, b) =>
+  const best = runs.reduce((a, b) =>
     timeToSeconds(a.time) <= timeToSeconds(b.time) ? a : b
   );
-  return [
+  const lines = [
     `Athlete: ${history.name} (ID: ${history.athleteId})`,
     `Personal best: ${best.time}`,
     `Event: ${best.eventName}`,
     `Date: ${best.date}`,
-  ].join('\n');
+  ];
+  if (pbContext) {
+    const fieldStr = pbContext.fieldSize > 0 ? ` of ${pbContext.fieldSize} finishers` : '';
+    lines.push(`Position: ${pbContext.position}${fieldStr}`);
+  }
+  return lines.join('\n');
 }
 
 function formatVolunteerSummary(
@@ -63,7 +74,7 @@ export const athleteTools: Tool[] = [
   {
     name: 'get_my_results',
     description:
-      'Get the run history for the configured default athlete. Returns recent parkrun results including times, positions, and PBs.',
+      'Get the run history for the configured default athlete. Returns recent adult parkrun results (5km events) including times, positions, and PBs. Junior parkruns are excluded by default.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -73,13 +84,17 @@ export const athleteTools: Tool[] = [
           minimum: 1,
           maximum: 500,
         },
+        includeJunior: {
+          type: 'boolean',
+          description: 'Set to true to include junior parkrun (2km) results alongside adult results. Default: false.',
+        },
       },
     },
   },
   {
     name: 'get_athlete_results',
     description:
-      'Get the run history for any parkrun athlete by their numeric ID.',
+      'Get the run history for any parkrun athlete by their numeric ID. Returns adult parkrun results (5km events) by default; junior parkruns excluded unless includeJunior is true.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -93,6 +108,10 @@ export const athleteTools: Tool[] = [
           description: 'Maximum number of recent runs to return (default: 10)',
           minimum: 1,
           maximum: 500,
+        },
+        includeJunior: {
+          type: 'boolean',
+          description: 'Set to true to include junior parkrun (2km) results alongside adult results. Default: false.',
         },
       },
       required: ['athleteId'],
@@ -101,13 +120,21 @@ export const athleteTools: Tool[] = [
   {
     name: 'get_my_personal_best',
     description:
-      'Get the personal best (fastest) parkrun time for the configured default athlete.',
-    inputSchema: { type: 'object', properties: {} },
+      'Get the personal best (fastest) adult parkrun time for the configured default athlete, including finishing position and field size. Junior parkruns are excluded from the PB calculation by default.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        includeJunior: {
+          type: 'boolean',
+          description: 'Set to true to include junior parkrun results in the PB calculation. Default: false.',
+        },
+      },
+    },
   },
   {
     name: 'get_personal_bests',
     description:
-      'Get the personal best (fastest) parkrun time for any athlete by their numeric ID.',
+      'Get the personal best (fastest) adult parkrun time for any athlete by their numeric ID, including finishing position and field size. Junior parkruns are excluded from the PB calculation by default.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -115,6 +142,10 @@ export const athleteTools: Tool[] = [
           type: 'string',
           description:
             'Numeric parkrun athlete ID (e.g. "1708821"). Same as barcode without the leading A.',
+        },
+        includeJunior: {
+          type: 'boolean',
+          description: 'Set to true to include junior parkrun results in the PB calculation. Default: false.',
         },
       },
       required: ['athleteId'],
@@ -152,31 +183,67 @@ export async function handleAthleteTool(
     if (!DEFAULT_ATHLETE_ID) {
       return 'PARKRUN_DEFAULT_ATHLETE_ID is not set. Please add it to your .env file.';
     }
-    const { limit } = z.object({ limit: z.number().optional() }).parse(args);
+    const { limit, includeJunior } = z.object({ limit: z.number().optional(), includeJunior: z.boolean().optional() }).parse(args);
     const history = await scrapeAthleteHistory(DEFAULT_ATHLETE_ID);
-    return formatAthleteHistory(history, limit ?? 10);
+    return formatAthleteHistory(history, limit ?? 10, includeJunior ?? false);
   }
 
   if (toolName === 'get_athlete_results') {
-    const { athleteId, limit } = z
-      .object({ athleteId: z.string(), limit: z.number().optional() })
+    const { athleteId, limit, includeJunior } = z
+      .object({ athleteId: z.string(), limit: z.number().optional(), includeJunior: z.boolean().optional() })
       .parse(args);
     const history = await scrapeAthleteHistory(athleteId);
-    return formatAthleteHistory(history, limit ?? 10);
+    return formatAthleteHistory(history, limit ?? 10, includeJunior ?? false);
   }
 
   if (toolName === 'get_my_personal_best') {
     if (!DEFAULT_ATHLETE_ID) {
       return 'PARKRUN_DEFAULT_ATHLETE_ID is not set. Please add it to your .env file.';
     }
+    const { includeJunior } = z.object({ includeJunior: z.boolean().optional() }).parse(args);
     const history = await scrapeAthleteHistory(DEFAULT_ATHLETE_ID);
-    return formatPersonalBest(history);
+    const adultRuns = (includeJunior ?? false) ? history.runs : history.runs.filter((r) => !r.isJunior);
+    const best = adultRuns.length > 0
+      ? adultRuns.reduce((a, b) => (timeToSeconds(a.time) <= timeToSeconds(b.time) ? a : b))
+      : null;
+    let pbContext: { position: number; fieldSize: number } | undefined;
+    if (best) {
+      try {
+        const eventResults = await scrapeResultsByDate(best.eventSlug, best.date);
+        const finisher = eventResults.finishers.find((f) => f.athleteId === DEFAULT_ATHLETE_ID);
+        pbContext = {
+          position: finisher?.position ?? best.position,
+          fieldSize: eventResults.finisherCount,
+        };
+      } catch {
+        // If event results unavailable, fall back to position from history without field size
+        pbContext = { position: best.position, fieldSize: 0 };
+      }
+    }
+    return formatPersonalBest(history, includeJunior ?? false, pbContext ?? undefined);
   }
 
   if (toolName === 'get_personal_bests') {
-    const { athleteId } = z.object({ athleteId: z.string() }).parse(args);
+    const { athleteId, includeJunior } = z.object({ athleteId: z.string(), includeJunior: z.boolean().optional() }).parse(args);
     const history = await scrapeAthleteHistory(athleteId);
-    return formatPersonalBest(history);
+    const adultRuns = (includeJunior ?? false) ? history.runs : history.runs.filter((r) => !r.isJunior);
+    const best = adultRuns.length > 0
+      ? adultRuns.reduce((a, b) => (timeToSeconds(a.time) <= timeToSeconds(b.time) ? a : b))
+      : null;
+    let pbContext: { position: number; fieldSize: number } | undefined;
+    if (best) {
+      try {
+        const eventResults = await scrapeResultsByDate(best.eventSlug, best.date);
+        const finisher = eventResults.finishers.find((f) => f.athleteId === athleteId);
+        pbContext = {
+          position: finisher?.position ?? best.position,
+          fieldSize: eventResults.finisherCount,
+        };
+      } catch {
+        pbContext = { position: best.position, fieldSize: 0 };
+      }
+    }
+    return formatPersonalBest(history, includeJunior ?? false, pbContext ?? undefined);
   }
 
   if (toolName === 'get_my_volunteer_history') {
