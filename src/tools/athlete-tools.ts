@@ -22,6 +22,30 @@ function formatAthleteHistory(
   return lines.join('\n');
 }
 
+function timeToSeconds(time: string): number {
+  const parts = time.split(':').map(Number);
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  return Infinity;
+}
+
+function formatPersonalBest(
+  history: Awaited<ReturnType<typeof scrapeAthleteHistory>>
+): string {
+  if (history.runs.length === 0) {
+    return `No runs found for athlete ${history.athleteId}.`;
+  }
+  const best = history.runs.reduce((a, b) =>
+    timeToSeconds(a.time) <= timeToSeconds(b.time) ? a : b
+  );
+  return [
+    `Athlete: ${history.name} (ID: ${history.athleteId})`,
+    `Personal best: ${best.time}`,
+    `Event: ${best.eventName}`,
+    `Date: ${best.date}`,
+  ].join('\n');
+}
+
 function formatVolunteerSummary(
   summary: Awaited<ReturnType<typeof scrapeAthleteVolunteerSummary>>
 ): string {
@@ -75,6 +99,28 @@ export const athleteTools: Tool[] = [
     },
   },
   {
+    name: 'get_my_personal_best',
+    description:
+      'Get the personal best (fastest) parkrun time for the configured default athlete.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'get_personal_bests',
+    description:
+      'Get the personal best (fastest) parkrun time for any athlete by their numeric ID.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        athleteId: {
+          type: 'string',
+          description:
+            'Numeric parkrun athlete ID (e.g. "1708821"). Same as barcode without the leading A.',
+        },
+      },
+      required: ['athleteId'],
+    },
+  },
+  {
     name: 'get_my_volunteer_history',
     description:
       'Get the volunteering history for the configured default athlete. Returns a summary of volunteer roles and total credits.',
@@ -117,6 +163,20 @@ export async function handleAthleteTool(
       .parse(args);
     const history = await scrapeAthleteHistory(athleteId);
     return formatAthleteHistory(history, limit ?? 10);
+  }
+
+  if (toolName === 'get_my_personal_best') {
+    if (!DEFAULT_ATHLETE_ID) {
+      return 'PARKRUN_DEFAULT_ATHLETE_ID is not set. Please add it to your .env file.';
+    }
+    const history = await scrapeAthleteHistory(DEFAULT_ATHLETE_ID);
+    return formatPersonalBest(history);
+  }
+
+  if (toolName === 'get_personal_bests') {
+    const { athleteId } = z.object({ athleteId: z.string() }).parse(args);
+    const history = await scrapeAthleteHistory(athleteId);
+    return formatPersonalBest(history);
   }
 
   if (toolName === 'get_my_volunteer_history') {
