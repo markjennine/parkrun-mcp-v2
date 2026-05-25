@@ -104,3 +104,41 @@ export interface PacingRecord {
   position: number;
   pacerRole: string;   // e.g. "Pacer 25:00"
 }
+
+export interface ClubResult {
+  position: number;
+  genderPosition: number;
+  name: string;
+  athleteId: string;
+  club: string;
+  time: string;
+}
+
+export interface ClubEventGroup {
+  eventName: string;
+  results: ClubResult[];
+}
+
+export interface ClubConsolidatedResults {
+  clubNum: string;
+  date: string;
+  eventGroups: ClubEventGroup[];
+  totalRunners: number;
+}
+
+export interface ClubMember {
+  name: string;
+  athleteId: string;
+  runsAtEvent: number;
+  totalRuns: number;
+  milestoneClub: string;
+}
+
+export interface ClubMembersSummary {
+  clubName: string;
+  eventSlug: string;
+  totalMembers: number;
+  totalRunsAtEvent: number;
+  totalRunsOverall: number;
+  members: ClubMember[];
+}

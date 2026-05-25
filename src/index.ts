@@ -7,10 +7,12 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import {
   athleteTools,
+  clubTools,
   eventTools,
   pacingTools,
   locationTools,
   handleAthleteTool,
+  handleClubTool,
   handleEventTool,
   handlePacingTool,
   handleLocationTool,
@@ -23,7 +25,7 @@ const server = new Server(
 
 // Register all tools
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [...athleteTools, ...eventTools, ...pacingTools, ...locationTools],
+  tools: [...athleteTools, ...eventTools, ...pacingTools, ...locationTools, ...clubTools],
 }));
 
 // Dispatch tool calls
@@ -38,6 +40,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const eventToolNames = new Set(eventTools.map((t) => t.name));
     const pacingToolNames = new Set(pacingTools.map((t) => t.name));
     const locationToolNames = new Set(locationTools.map((t) => t.name));
+    const clubToolNames = new Set(clubTools.map((t) => t.name));
 
     if (athleteToolNames.has(name)) {
       text = await handleAthleteTool(name, toolArgs);
@@ -45,6 +48,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       text = await handleEventTool(name, toolArgs);
     } else if (pacingToolNames.has(name)) {
       text = await handlePacingTool(name, toolArgs);
+    } else if (clubToolNames.has(name)) {
+      text = await handleClubTool(name, toolArgs);
     } else if (locationToolNames.has(name)) {
       text = await handleLocationTool(name, toolArgs);
     } else {
