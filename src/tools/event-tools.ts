@@ -18,11 +18,11 @@ function formatResults(results: EventResults): string {
     'Top 10 finishers:',
     ...results.finishers.slice(0, 10).map(
       (f) =>
-        `  ${String(f.position).padStart(3)}.  ${f.name.padEnd(25)}  ${f.time}  ${f.pbStatus ? `[${f.pbStatus}]` : ''}`
+        `  ${String(f.position).padStart(3)}.  ${f.name.padEnd(25)}  ${f.time}  ${f.pbStatus ? `[${f.pbStatus}]  ` : ''}${f.athleteId ? `(ID: ${f.athleteId})` : ''}`
     ),
     '',
     'Volunteers:',
-    ...results.volunteers.map((v) => `  ${v.role.padEnd(30)}  ${v.name}`),
+    ...results.volunteers.map((v) => `  ${v.role.padEnd(30)}  ${v.name.padEnd(25)}${v.athleteId ? `  (ID: ${v.athleteId})` : ''}`),
   ];
   return lines.join('\n');
 }
@@ -124,7 +124,7 @@ export async function handleEventTool(
     for (const entry of roster) {
       lines.push(`\n  ${entry.date}`);
       for (const slot of entry.roles) {
-        lines.push(`    ${slot.role.padEnd(30)}  ${slot.name}`);
+        lines.push(`    ${slot.role.padEnd(30)}  ${slot.name.padEnd(25)}${slot.athleteId ? `  (ID: ${slot.athleteId})` : ''}`);
       }
     }
     return lines.join('\n');

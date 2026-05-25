@@ -70,7 +70,7 @@ export interface EventHistoryEntry {
 
 export interface VolunteerRosterDate {
   date: string;
-  roles: Array<{ role: string; name: string }>;
+  roles: Array<{ role: string; name: string; athleteId?: string }>;
 }
 
 export interface VolunteerRoleSummary {

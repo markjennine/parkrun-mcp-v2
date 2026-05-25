@@ -144,13 +144,18 @@ export async function scrapeVolunteerRoster(
     if (cells.length < 2) return;
     const date = cells.eq(0).text().trim();
     const role = cells.eq(1).text().trim();
-    const name = cells.eq(2)?.text().trim() ?? 'Unfilled';
+    const nameCell = cells.eq(2);
+    const nameLink = nameCell.find('a').first();
+    const href = nameLink.attr('href') ?? '';
+    const idMatch = href.match(/(\d+)$/);
+    const athleteId = idMatch ? idMatch[1] : undefined;
+    const name = nameCell.text().trim() || 'Unfilled';
     if (!date) return;
     const existing = roster.find((r) => r.date === date);
     if (existing) {
-      existing.roles.push({ role, name });
+      existing.roles.push({ role, name, athleteId });
     } else {
-      roster.push({ date, roles: [{ role, name }] });
+      roster.push({ date, roles: [{ role, name, athleteId }] });
     }
   });
 
