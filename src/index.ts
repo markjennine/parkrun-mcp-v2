@@ -9,9 +9,11 @@ import {
   athleteTools,
   eventTools,
   pacingTools,
+  locationTools,
   handleAthleteTool,
   handleEventTool,
   handlePacingTool,
+  handleLocationTool,
 } from './tools/index';
 
 const server = new Server(
@@ -21,7 +23,7 @@ const server = new Server(
 
 // Register all tools
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [...athleteTools, ...eventTools, ...pacingTools],
+  tools: [...athleteTools, ...eventTools, ...pacingTools, ...locationTools],
 }));
 
 // Dispatch tool calls
@@ -34,8 +36,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     const athleteToolNames = new Set(athleteTools.map((t) => t.name));
     const eventToolNames = new Set(eventTools.map((t) => t.name));
-
     const pacingToolNames = new Set(pacingTools.map((t) => t.name));
+    const locationToolNames = new Set(locationTools.map((t) => t.name));
 
     if (athleteToolNames.has(name)) {
       text = await handleAthleteTool(name, toolArgs);
@@ -43,6 +45,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       text = await handleEventTool(name, toolArgs);
     } else if (pacingToolNames.has(name)) {
       text = await handlePacingTool(name, toolArgs);
+    } else if (locationToolNames.has(name)) {
+      text = await handleLocationTool(name, toolArgs);
     } else {
       throw new Error(`Unknown tool: ${name}`);
     }

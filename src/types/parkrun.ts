@@ -84,6 +84,17 @@ export interface AthleteVolunteerSummary {
   roles: VolunteerRoleSummary[];
 }
 
+export interface ParkrunEvent {
+  id: number;
+  eventSlug: string;
+  longName: string;
+  shortName: string;
+  location: string;
+  latitude: number;
+  longitude: number;
+  countryCode: number;
+}
+
 export interface PacingRecord {
   date: string;        // YYYY-MM-DD
   eventName: string;
