@@ -37,7 +37,7 @@ export const locationTools: Tool[] = [
         },
         includeJunior: {
           type: 'boolean',
-          description: 'Include junior parkrun events (2km, held on Sunday mornings) in results. Defaults to false.',
+          description: 'Include junior parkrun events (2km, Sunday mornings, under-14s) in results. Only set to true when the user explicitly asks about junior parkruns. Defaults to false.',
         },
       },
       required: ['query'],
@@ -48,7 +48,9 @@ export const locationTools: Tool[] = [
     description:
       'Find the nearest parkrun events to a given latitude/longitude. ' +
       'Use this when the user asks "what is the nearest parkrun to [place]" — ' +
-      'resolve the place name to coordinates first, then call this tool.',
+      'resolve the place name to coordinates first, then call this tool. ' +
+      'Junior parkrun events (2 km, Sunday mornings, under-14s) are excluded by default. ' +
+      'Only set includeJunior=true when the user explicitly asks about junior parkruns.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -68,7 +70,7 @@ export const locationTools: Tool[] = [
         },
         includeJunior: {
           type: 'boolean',
-          description: 'Include junior parkrun events (2km, held on Sunday mornings) in results. Defaults to false.',
+          description: 'Include junior parkrun events (2km, Sunday mornings, under-14s) in results. Only set to true when the user explicitly asks about junior parkruns. Defaults to false.',
         },
       },
       required: ['latitude', 'longitude'],
