@@ -173,7 +173,53 @@ export const athleteTools: Tool[] = [
       required: ['athleteId'],
     },
   },
+  {
+    name: 'get_my_club',
+    description: 'Get the club affiliation for the configured default athlete, based on their most recent adult parkrun result.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'get_athlete_club',
+    description: 'Get the club affiliation for any parkrun athlete by their numeric ID, based on their most recent adult parkrun result.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        athleteId: {
+          type: 'string',
+          description: 'Numeric parkrun athlete ID (e.g. "1708821"). Same as barcode without the leading A.',
+        },
+      },
+      required: ['athleteId'],
+    },
+  },
 ];
+
+
+async function getClubForAthlete(athleteId: string): Promise<string> {
+  const history = await scrapeAthleteHistory(athleteId);
+  const recentRun = history.runs.find((r) => !r.isJunior);
+
+  if (!recentRun) {
+    return `No adult parkrun results found for athlete ${athleteId}.`;
+  }
+
+  try {
+    const eventResults = await scrapeResultsByDate(recentRun.eventSlug, recentRun.date);
+    const finisher = eventResults.finishers.find((f) => f.athleteId === athleteId);
+
+    if (!finisher) {
+      return `Athlete ${athleteId} was not found in the finisher list for ${recentRun.eventName} on ${recentRun.date} (possible DNS/DNF).`;
+    }
+
+    const club = finisher.club.trim();
+    return [
+      `Athlete: ${history.name} (ID: ${athleteId})`,
+      `Club: ${club || 'Unaffiliated'}`,
+    ].join('\n');
+  } catch {
+    return `Could not retrieve results for ${recentRun.eventName} on ${recentRun.date} to determine club affiliation.`;
+  }
+}
 
 export async function handleAthleteTool(
   toolName: string,
@@ -258,6 +304,18 @@ export async function handleAthleteTool(
     const { athleteId } = z.object({ athleteId: z.string() }).parse(args);
     const summary = await scrapeAthleteVolunteerSummary(athleteId);
     return formatVolunteerSummary(summary);
+  }
+
+  if (toolName === 'get_my_club') {
+    if (!DEFAULT_ATHLETE_ID) {
+      return 'PARKRUN_DEFAULT_ATHLETE_ID is not set. Please add it to your .env file.';
+    }
+    return getClubForAthlete(DEFAULT_ATHLETE_ID);
+  }
+
+  if (toolName === 'get_athlete_club') {
+    const { athleteId } = z.object({ athleteId: z.string() }).parse(args);
+    return getClubForAthlete(athleteId);
   }
 
   throw new Error(`Unknown athlete tool: ${toolName}`);
