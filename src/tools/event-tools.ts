@@ -10,13 +10,17 @@ import type { EventResults } from '../types/parkrun.js';
 
 const DEFAULT_EVENT = process.env.PARKRUN_DEFAULT_EVENT ?? '';
 
-function formatResults(results: EventResults): string {
+function formatResults(results: EventResults, limit = 10): string {
+  const finishers = limit === 0 ? results.finishers : results.finishers.slice(0, limit);
+  const heading = limit === 0 || limit >= results.finisherCount
+    ? `All ${results.finisherCount} finishers:`
+    : `Top ${limit} finishers:`;
   const lines = [
     `${results.eventName} — ${results.date} (Event #${results.eventNumber})`,
     `Finishers: ${results.finisherCount}  Volunteers: ${results.volunteerCount}`,
     '',
-    'Top 10 finishers:',
-    ...results.finishers.slice(0, 10).map(
+    heading,
+    ...finishers.map(
       (f) =>
         `  ${String(f.position).padStart(3)}.  ${f.name.padEnd(25)}  ${f.time}  ${f.pbStatus ? `[${f.pbStatus}]  ` : ''}${f.athleteId ? `(ID: ${f.athleteId})` : ''}`
     ),
@@ -26,6 +30,11 @@ function formatResults(results: EventResults): string {
   ];
   return lines.join('\n');
 }
+
+const limitSchema = {
+  type: 'number',
+  description: 'Max finishers to return (default 10; use 0 for all).',
+} as const;
 
 export const eventTools: Tool[] = [
   {
@@ -40,6 +49,7 @@ export const eventTools: Tool[] = [
           description:
             'Lowercase event slug, e.g. "frimleylodge", "bushy", "southwark".',
         },
+        limit: limitSchema,
       },
       required: ['eventSlug'],
     },
@@ -55,6 +65,7 @@ export const eventTools: Tool[] = [
           type: 'string',
           description: 'Date in YYYY-MM-DD format, e.g. "2026-05-23".',
         },
+        limit: limitSchema,
       },
       required: ['eventSlug', 'date'],
     },
@@ -83,6 +94,20 @@ export const eventTools: Tool[] = [
       required: ['eventSlug'],
     },
   },
+  {
+    name: 'find_athlete_id_by_name',
+    description:
+      'Search event results by runner name to find their athlete ID. Searches the latest results by default; pass a date (YYYY-MM-DD) to search a specific event.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        eventSlug: { type: 'string', description: 'Lowercase event slug, e.g. "frimleylodge".' },
+        name: { type: 'string', description: 'Full or partial name to search for (case-insensitive).' },
+        date: { type: 'string', description: 'Optional date YYYY-MM-DD; omit for latest results.' },
+      },
+      required: ['eventSlug', 'name'],
+    },
+  },
 ];
 
 export async function handleEventTool(
@@ -90,17 +115,19 @@ export async function handleEventTool(
   args: Record<string, unknown>
 ): Promise<string> {
   if (toolName === 'get_event_latest_results') {
-    const { eventSlug } = z.object({ eventSlug: z.string() }).parse(args);
+    const { eventSlug, limit } = z
+      .object({ eventSlug: z.string(), limit: z.number().optional() })
+      .parse(args);
     const results = await scrapeLatestResults(eventSlug);
-    return formatResults(results);
+    return formatResults(results, limit);
   }
 
   if (toolName === 'get_event_results_by_date') {
-    const { eventSlug, date } = z
-      .object({ eventSlug: z.string(), date: z.string() })
+    const { eventSlug, date, limit } = z
+      .object({ eventSlug: z.string(), date: z.string(), limit: z.number().optional() })
       .parse(args);
     const results = await scrapeResultsByDate(eventSlug, date);
-    return formatResults(results);
+    return formatResults(results, limit);
   }
 
   if (toolName === 'get_event_history') {
@@ -127,6 +154,30 @@ export async function handleEventTool(
         lines.push(`    ${slot.role.padEnd(30)}  ${slot.name.padEnd(25)}${slot.athleteId ? `  (ID: ${slot.athleteId})` : ''}`);
       }
     }
+    return lines.join('\n');
+  }
+
+  if (toolName === 'find_athlete_id_by_name') {
+    const { eventSlug, name, date } = z
+      .object({ eventSlug: z.string(), name: z.string(), date: z.string().optional() })
+      .parse(args);
+    const results = date
+      ? await scrapeResultsByDate(eventSlug, date)
+      : await scrapeLatestResults(eventSlug);
+    const query = name.toLowerCase();
+    const matches = results.finishers.filter((f) =>
+      f.name.toLowerCase().includes(query)
+    );
+    if (matches.length === 0) {
+      return `No runners matching "${name}" found in ${results.eventName} results for ${results.date}.`;
+    }
+    const lines = [
+      `Runners matching "${name}" in ${results.eventName} — ${results.date}:`,
+      ...matches.map(
+        (f) =>
+          `  ${String(f.position).padStart(3)}.  ${f.name.padEnd(25)}  ${f.time}  ${f.athleteId ? `(ID: ${f.athleteId})` : '(no ID)'}`
+      ),
+    ];
     return lines.join('\n');
   }
 
