@@ -10,6 +10,10 @@ import type { EventResults } from '../types/parkrun.js';
 
 const DEFAULT_EVENT = process.env.PARKRUN_DEFAULT_EVENT ?? '';
 
+function toArray<T>(v: T | T[]): T[] {
+  return Array.isArray(v) ? v : [v];
+}
+
 function formatResults(results: EventResults, limit = 10): string {
   const finishers = limit === 0 ? results.finishers : results.finishers.slice(0, limit);
   const heading = limit === 0 || limit >= results.finisherCount
@@ -36,19 +40,23 @@ const limitSchema = {
   description: 'Max finishers to return (default 10; use 0 for all).',
 } as const;
 
+const slugOrSlugsSchema = {
+  oneOf: [
+    { type: 'string' },
+    { type: 'array', items: { type: 'string' }, minItems: 1 },
+  ],
+  description: 'Lowercase event slug, or an array of slugs for batch lookup.',
+} as const;
+
 export const eventTools: Tool[] = [
   {
     name: 'get_event_latest_results',
     description:
-      'Get the most recent results for a named parkrun event, including finisher list and volunteers.',
+      'Get the most recent results for a named parkrun event, including finisher list and volunteers. Pass an array of slugs to batch-fetch multiple events.',
     inputSchema: {
       type: 'object',
       properties: {
-        eventSlug: {
-          type: 'string',
-          description:
-            'Lowercase event slug, e.g. "frimleylodge", "bushy", "southwark".',
-        },
+        eventSlug: slugOrSlugsSchema,
         limit: limitSchema,
       },
       required: ['eventSlug'],
@@ -56,11 +64,11 @@ export const eventTools: Tool[] = [
   },
   {
     name: 'get_event_results_by_date',
-    description: 'Get parkrun results for a specific event and date.',
+    description: 'Get parkrun results for a specific event and date. Pass an array of slugs to fetch results for multiple events on the same date.',
     inputSchema: {
       type: 'object',
       properties: {
-        eventSlug: { type: 'string', description: 'Lowercase event slug.' },
+        eventSlug: slugOrSlugsSchema,
         date: {
           type: 'string',
           description: 'Date in YYYY-MM-DD format, e.g. "2026-05-23".',
@@ -73,11 +81,11 @@ export const eventTools: Tool[] = [
   {
     name: 'get_event_history',
     description:
-      'Get the full history of all past events for a parkrun location.',
+      'Get the full history of all past events for a parkrun location. Pass an array of slugs for batch lookup.',
     inputSchema: {
       type: 'object',
       properties: {
-        eventSlug: { type: 'string', description: 'Lowercase event slug.' },
+        eventSlug: slugOrSlugsSchema,
       },
       required: ['eventSlug'],
     },
@@ -85,11 +93,11 @@ export const eventTools: Tool[] = [
   {
     name: 'get_volunteer_roster',
     description:
-      'Get the upcoming volunteer roster for a parkrun event.',
+      'Get the upcoming volunteer roster for a parkrun event. Pass an array of slugs for batch lookup.',
     inputSchema: {
       type: 'object',
       properties: {
-        eventSlug: { type: 'string', description: 'Lowercase event slug.' },
+        eventSlug: slugOrSlugsSchema,
       },
       required: ['eventSlug'],
     },
@@ -116,45 +124,155 @@ export async function handleEventTool(
 ): Promise<string> {
   if (toolName === 'get_event_latest_results') {
     const { eventSlug, limit } = z
-      .object({ eventSlug: z.string(), limit: z.number().optional() })
+      .object({ eventSlug: z.union([z.string(), z.array(z.string()).min(1)]), limit: z.number().optional() })
       .parse(args);
-    const results = await scrapeLatestResults(eventSlug);
-    return formatResults(results, limit);
+    const slugs = toArray(eventSlug);
+
+    const settled = await Promise.all(
+      slugs.map(async (slug) => {
+        try {
+          return { key: slug, result: await scrapeLatestResults(slug), error: null };
+        } catch (err) {
+          return { key: slug, result: null as EventResults | null, error: err instanceof Error ? err.message : String(err) };
+        }
+      })
+    );
+
+    if (slugs.length === 1) {
+      const { result, error } = settled[0];
+      if (error) return `Error fetching results for ${slugs[0]}: ${error}`;
+      return formatResults(result!, limit);
+    }
+
+    return settled
+      .map(({ key, result, error }) =>
+        `=== ${key} ===\n${error ? `Error: ${error}` : formatResults(result!, limit)}`
+      )
+      .join('\n\n');
   }
 
   if (toolName === 'get_event_results_by_date') {
     const { eventSlug, date, limit } = z
-      .object({ eventSlug: z.string(), date: z.string(), limit: z.number().optional() })
+      .object({ eventSlug: z.union([z.string(), z.array(z.string()).min(1)]), date: z.string(), limit: z.number().optional() })
       .parse(args);
-    const results = await scrapeResultsByDate(eventSlug, date);
-    return formatResults(results, limit);
+    const slugs = toArray(eventSlug);
+
+    const settled = await Promise.all(
+      slugs.map(async (slug) => {
+        try {
+          return { key: slug, result: await scrapeResultsByDate(slug, date), error: null };
+        } catch (err) {
+          return { key: slug, result: null as EventResults | null, error: err instanceof Error ? err.message : String(err) };
+        }
+      })
+    );
+
+    if (slugs.length === 1) {
+      const { result, error } = settled[0];
+      if (error) return `Error fetching results for ${slugs[0]} on ${date}: ${error}`;
+      return formatResults(result!, limit);
+    }
+
+    return settled
+      .map(({ key, result, error }) =>
+        `=== ${key} ===\n${error ? `Error: ${error}` : formatResults(result!, limit)}`
+      )
+      .join('\n\n');
   }
 
   if (toolName === 'get_event_history') {
-    const { eventSlug } = z.object({ eventSlug: z.string() }).parse(args);
-    const history = await scrapeEventHistory(eventSlug);
-    const lines = [
-      `Event history for ${eventSlug} (${history.length} events):`,
-      ...history.slice(0, 20).map(
-        (e) =>
-          `  ${e.date}  Event #${e.eventNumber}  ${e.finisherCount} finishers  First: ${e.firstFinisherName} ${e.firstFinisherTime}`
-      ),
-    ];
-    return lines.join('\n');
+    const { eventSlug } = z
+      .object({ eventSlug: z.union([z.string(), z.array(z.string()).min(1)]) })
+      .parse(args);
+    const slugs = toArray(eventSlug);
+
+    const settled = await Promise.all(
+      slugs.map(async (slug) => {
+        try {
+          return { key: slug, result: await scrapeEventHistory(slug), error: null };
+        } catch (err) {
+          return { key: slug, result: null as Awaited<ReturnType<typeof scrapeEventHistory>> | null, error: err instanceof Error ? err.message : String(err) };
+        }
+      })
+    );
+
+    if (slugs.length === 1) {
+      const { key, result, error } = settled[0];
+      if (error) return `Error fetching history for ${key}: ${error}`;
+      const history = result!;
+      const lines = [
+        `Event history for ${key} (${history.length} events):`,
+        ...history.slice(0, 20).map(
+          (e) =>
+            `  ${e.date}  Event #${e.eventNumber}  ${e.finisherCount} finishers  First: ${e.firstFinisherName} ${e.firstFinisherTime}`
+        ),
+      ];
+      return lines.join('\n');
+    }
+
+    return settled
+      .map(({ key, result, error }) => {
+        if (error) return `=== ${key} ===\nError: ${error}`;
+        const history = result!;
+        const lines = [
+          `=== ${key} ===`,
+          `Event history for ${key} (${history.length} events):`,
+          ...history.slice(0, 20).map(
+            (e) =>
+              `  ${e.date}  Event #${e.eventNumber}  ${e.finisherCount} finishers  First: ${e.firstFinisherName} ${e.firstFinisherTime}`
+          ),
+        ];
+        return lines.join('\n');
+      })
+      .join('\n\n');
   }
 
   if (toolName === 'get_volunteer_roster') {
-    const { eventSlug } = z.object({ eventSlug: z.string() }).parse(args);
-    const roster = await scrapeVolunteerRoster(eventSlug);
-    if (roster.length === 0) return `No upcoming volunteer roster found for ${eventSlug}.`;
-    const lines = [`Volunteer roster for ${eventSlug}:`];
-    for (const entry of roster) {
-      lines.push(`\n  ${entry.date}`);
-      for (const slot of entry.roles) {
-        lines.push(`    ${slot.role.padEnd(30)}  ${slot.name.padEnd(25)}${slot.athleteId ? `  (ID: ${slot.athleteId})` : ''}`);
+    const { eventSlug } = z
+      .object({ eventSlug: z.union([z.string(), z.array(z.string()).min(1)]) })
+      .parse(args);
+    const slugs = toArray(eventSlug);
+
+    const settled = await Promise.all(
+      slugs.map(async (slug) => {
+        try {
+          return { key: slug, result: await scrapeVolunteerRoster(slug), error: null };
+        } catch (err) {
+          return { key: slug, result: null as Awaited<ReturnType<typeof scrapeVolunteerRoster>> | null, error: err instanceof Error ? err.message : String(err) };
+        }
+      })
+    );
+
+    if (slugs.length === 1) {
+      const { key, result, error } = settled[0];
+      if (error) return `Error fetching roster for ${key}: ${error}`;
+      const roster = result!;
+      if (roster.length === 0) return `No upcoming volunteer roster found for ${key}.`;
+      const lines = [`Volunteer roster for ${key}:`];
+      for (const entry of roster) {
+        lines.push(`\n  ${entry.date}`);
+        for (const slot of entry.roles) {
+          lines.push(`    ${slot.role.padEnd(30)}  ${slot.name.padEnd(25)}${slot.athleteId ? `  (ID: ${slot.athleteId})` : ''}`);
+        }
       }
+      return lines.join('\n');
     }
-    return lines.join('\n');
+
+    return settled
+      .map(({ key, result, error }) => {
+        if (error) return `=== ${key} ===\nError: ${error}`;
+        const roster = result!;
+        if (roster.length === 0) return `=== ${key} ===\nNo upcoming volunteer roster found for ${key}.`;
+        const lines = [`=== ${key} ===`, `Volunteer roster for ${key}:`];
+        for (const entry of roster) {
+          lines.push(`\n  ${entry.date}`);
+          for (const slot of entry.roles) {
+            lines.push(`    ${slot.role.padEnd(30)}  ${slot.name.padEnd(25)}${slot.athleteId ? `  (ID: ${slot.athleteId})` : ''}`);
+          }
+        }
+        return lines.join('\n');
+      })
+      .join('\n\n');
   }
 
   if (toolName === 'find_athlete_id_by_name') {

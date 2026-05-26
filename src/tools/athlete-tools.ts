@@ -5,6 +5,10 @@ import { scrapeResultsByDate } from '../scraper/event.js';
 
 const DEFAULT_ATHLETE_ID = process.env.PARKRUN_DEFAULT_ATHLETE_ID ?? '';
 
+function toArray<T>(v: T | T[]): T[] {
+  return Array.isArray(v) ? v : [v];
+}
+
 function formatAthleteHistory(
   history: Awaited<ReturnType<typeof scrapeAthleteHistory>>,
   limit?: number,
@@ -77,6 +81,14 @@ function formatVolunteerSummary(
   return lines.join('\n');
 }
 
+const idOrIds = {
+  oneOf: [
+    { type: 'string' },
+    { type: 'array', items: { type: 'string' }, minItems: 1 },
+  ],
+  description: 'Numeric parkrun athlete ID (e.g. "1708821"), or an array of IDs for batch lookup.',
+} as const;
+
 export const athleteTools: Tool[] = [
   {
     name: 'get_my_results',
@@ -101,15 +113,11 @@ export const athleteTools: Tool[] = [
   {
     name: 'get_athlete_results',
     description:
-      'Get the run history for any parkrun athlete by their numeric ID. Returns adult parkrun results (5km events) by default; junior parkruns excluded unless includeJunior is true.',
+      'Get the run history for any parkrun athlete by their numeric ID. Pass an array of IDs for batch lookup. Returns adult parkrun results (5km events) by default; junior parkruns excluded unless includeJunior is true.',
     inputSchema: {
       type: 'object',
       properties: {
-        athleteId: {
-          type: 'string',
-          description:
-            'Numeric parkrun athlete ID (e.g. "1708821"). Same as barcode without the leading A.',
-        },
+        athleteId: idOrIds,
         limit: {
           type: 'number',
           description: 'Maximum number of recent runs to return (default: 10)',
@@ -141,15 +149,11 @@ export const athleteTools: Tool[] = [
   {
     name: 'get_personal_bests',
     description:
-      'Get the personal best (fastest) adult parkrun time for any athlete by their numeric ID, including finishing position and field size. Junior parkruns are excluded from the PB calculation by default.',
+      'Get the personal best (fastest) adult parkrun time for any athlete by their numeric ID, including finishing position and field size. Pass an array of IDs for batch lookup. Junior parkruns are excluded from the PB calculation by default.',
     inputSchema: {
       type: 'object',
       properties: {
-        athleteId: {
-          type: 'string',
-          description:
-            'Numeric parkrun athlete ID (e.g. "1708821"). Same as barcode without the leading A.',
-        },
+        athleteId: idOrIds,
         includeJunior: {
           type: 'boolean',
           description: 'Set to true to include junior parkrun results in the PB calculation. Default: false.',
@@ -167,15 +171,11 @@ export const athleteTools: Tool[] = [
   {
     name: 'get_volunteer_history',
     description:
-      'Get the volunteering history for any parkrun athlete by their numeric ID. Returns a summary of volunteer roles and total credits.',
+      'Get the volunteering history for any parkrun athlete by their numeric ID. Pass an array of IDs for batch lookup. Returns a summary of volunteer roles and total credits.',
     inputSchema: {
       type: 'object',
       properties: {
-        athleteId: {
-          type: 'string',
-          description:
-            'Numeric parkrun athlete ID (e.g. "1708821"). Same as barcode without the leading A.',
-        },
+        athleteId: idOrIds,
       },
       required: ['athleteId'],
     },
@@ -187,14 +187,11 @@ export const athleteTools: Tool[] = [
   },
   {
     name: 'get_athlete_club',
-    description: 'Get the club affiliation for any parkrun athlete by their numeric ID, based on their most recent adult parkrun result.',
+    description: 'Get the club affiliation for any parkrun athlete by their numeric ID. Pass an array of IDs for batch lookup.',
     inputSchema: {
       type: 'object',
       properties: {
-        athleteId: {
-          type: 'string',
-          description: 'Numeric parkrun athlete ID (e.g. "1708821"). Same as barcode without the leading A.',
-        },
+        athleteId: idOrIds,
       },
       required: ['athleteId'],
     },
@@ -228,6 +225,31 @@ async function getClubForAthlete(athleteId: string): Promise<string> {
   }
 }
 
+async function getPersonalBestForAthlete(
+  athleteId: string,
+  includeJunior: boolean
+): Promise<string> {
+  const history = await scrapeAthleteHistory(athleteId);
+  const adultRuns = includeJunior ? history.runs : history.runs.filter((r) => !r.isJunior);
+  const best = adultRuns.length > 0
+    ? adultRuns.reduce((a, b) => (timeToSeconds(a.time) <= timeToSeconds(b.time) ? a : b))
+    : null;
+  let pbContext: { position: number; fieldSize: number } | undefined;
+  if (best) {
+    try {
+      const eventResults = await scrapeResultsByDate(best.eventSlug, best.date);
+      const finisher = eventResults.finishers.find((f) => f.athleteId === athleteId);
+      pbContext = {
+        position: finisher?.position ?? best.position,
+        fieldSize: eventResults.finisherCount,
+      };
+    } catch {
+      pbContext = { position: best.position, fieldSize: 0 };
+    }
+  }
+  return formatPersonalBest(history, includeJunior, pbContext ?? undefined);
+}
+
 export async function handleAthleteTool(
   toolName: string,
   args: Record<string, unknown>
@@ -243,10 +265,32 @@ export async function handleAthleteTool(
 
   if (toolName === 'get_athlete_results') {
     const { athleteId, limit, includeJunior } = z
-      .object({ athleteId: z.string(), limit: z.number().optional(), includeJunior: z.boolean().optional() })
+      .object({ athleteId: z.union([z.string(), z.array(z.string()).min(1)]), limit: z.number().optional(), includeJunior: z.boolean().optional() })
       .parse(args);
-    const history = await scrapeAthleteHistory(athleteId);
-    return formatAthleteHistory(history, limit ?? 10, includeJunior ?? false);
+    const ids = toArray(athleteId);
+
+    const settled = await Promise.all(
+      ids.map(async (id) => {
+        try {
+          const history = await scrapeAthleteHistory(id);
+          return { key: id, result: formatAthleteHistory(history, limit ?? 10, includeJunior ?? false), error: null };
+        } catch (err) {
+          return { key: id, result: null as string | null, error: err instanceof Error ? err.message : String(err) };
+        }
+      })
+    );
+
+    if (ids.length === 1) {
+      const { result, error } = settled[0];
+      if (error) return `Error fetching results for athlete ${ids[0]}: ${error}`;
+      return result!;
+    }
+
+    return settled
+      .map(({ key, result, error }) =>
+        `=== ${key} ===\n${error ? `Error: ${error}` : result!}`
+      )
+      .join('\n\n');
   }
 
   if (toolName === 'get_my_personal_best') {
@@ -254,49 +298,36 @@ export async function handleAthleteTool(
       return 'PARKRUN_DEFAULT_ATHLETE_ID is not set. Please add it to your .env file.';
     }
     const { includeJunior } = z.object({ includeJunior: z.boolean().optional() }).parse(args);
-    const history = await scrapeAthleteHistory(DEFAULT_ATHLETE_ID);
-    const adultRuns = (includeJunior ?? false) ? history.runs : history.runs.filter((r) => !r.isJunior);
-    const best = adultRuns.length > 0
-      ? adultRuns.reduce((a, b) => (timeToSeconds(a.time) <= timeToSeconds(b.time) ? a : b))
-      : null;
-    let pbContext: { position: number; fieldSize: number } | undefined;
-    if (best) {
-      try {
-        const eventResults = await scrapeResultsByDate(best.eventSlug, best.date);
-        const finisher = eventResults.finishers.find((f) => f.athleteId === DEFAULT_ATHLETE_ID);
-        pbContext = {
-          position: finisher?.position ?? best.position,
-          fieldSize: eventResults.finisherCount,
-        };
-      } catch {
-        // If event results unavailable, fall back to position from history without field size
-        pbContext = { position: best.position, fieldSize: 0 };
-      }
-    }
-    return formatPersonalBest(history, includeJunior ?? false, pbContext ?? undefined);
+    return getPersonalBestForAthlete(DEFAULT_ATHLETE_ID, includeJunior ?? false);
   }
 
   if (toolName === 'get_personal_bests') {
-    const { athleteId, includeJunior } = z.object({ athleteId: z.string(), includeJunior: z.boolean().optional() }).parse(args);
-    const history = await scrapeAthleteHistory(athleteId);
-    const adultRuns = (includeJunior ?? false) ? history.runs : history.runs.filter((r) => !r.isJunior);
-    const best = adultRuns.length > 0
-      ? adultRuns.reduce((a, b) => (timeToSeconds(a.time) <= timeToSeconds(b.time) ? a : b))
-      : null;
-    let pbContext: { position: number; fieldSize: number } | undefined;
-    if (best) {
-      try {
-        const eventResults = await scrapeResultsByDate(best.eventSlug, best.date);
-        const finisher = eventResults.finishers.find((f) => f.athleteId === athleteId);
-        pbContext = {
-          position: finisher?.position ?? best.position,
-          fieldSize: eventResults.finisherCount,
-        };
-      } catch {
-        pbContext = { position: best.position, fieldSize: 0 };
-      }
+    const { athleteId, includeJunior } = z
+      .object({ athleteId: z.union([z.string(), z.array(z.string()).min(1)]), includeJunior: z.boolean().optional() })
+      .parse(args);
+    const ids = toArray(athleteId);
+
+    const settled = await Promise.all(
+      ids.map(async (id) => {
+        try {
+          return { key: id, result: await getPersonalBestForAthlete(id, includeJunior ?? false), error: null };
+        } catch (err) {
+          return { key: id, result: null as string | null, error: err instanceof Error ? err.message : String(err) };
+        }
+      })
+    );
+
+    if (ids.length === 1) {
+      const { result, error } = settled[0];
+      if (error) return `Error fetching personal best for athlete ${ids[0]}: ${error}`;
+      return result!;
     }
-    return formatPersonalBest(history, includeJunior ?? false, pbContext ?? undefined);
+
+    return settled
+      .map(({ key, result, error }) =>
+        `=== ${key} ===\n${error ? `Error: ${error}` : result!}`
+      )
+      .join('\n\n');
   }
 
   if (toolName === 'get_my_volunteer_history') {
@@ -308,9 +339,33 @@ export async function handleAthleteTool(
   }
 
   if (toolName === 'get_volunteer_history') {
-    const { athleteId } = z.object({ athleteId: z.string() }).parse(args);
-    const summary = await scrapeAthleteVolunteerSummary(athleteId);
-    return formatVolunteerSummary(summary);
+    const { athleteId } = z
+      .object({ athleteId: z.union([z.string(), z.array(z.string()).min(1)]) })
+      .parse(args);
+    const ids = toArray(athleteId);
+
+    const settled = await Promise.all(
+      ids.map(async (id) => {
+        try {
+          const summary = await scrapeAthleteVolunteerSummary(id);
+          return { key: id, result: formatVolunteerSummary(summary), error: null };
+        } catch (err) {
+          return { key: id, result: null as string | null, error: err instanceof Error ? err.message : String(err) };
+        }
+      })
+    );
+
+    if (ids.length === 1) {
+      const { result, error } = settled[0];
+      if (error) return `Error fetching volunteer history for athlete ${ids[0]}: ${error}`;
+      return result!;
+    }
+
+    return settled
+      .map(({ key, result, error }) =>
+        `=== ${key} ===\n${error ? `Error: ${error}` : result!}`
+      )
+      .join('\n\n');
   }
 
   if (toolName === 'get_my_club') {
@@ -321,8 +376,32 @@ export async function handleAthleteTool(
   }
 
   if (toolName === 'get_athlete_club') {
-    const { athleteId } = z.object({ athleteId: z.string() }).parse(args);
-    return getClubForAthlete(athleteId);
+    const { athleteId } = z
+      .object({ athleteId: z.union([z.string(), z.array(z.string()).min(1)]) })
+      .parse(args);
+    const ids = toArray(athleteId);
+
+    const settled = await Promise.all(
+      ids.map(async (id) => {
+        try {
+          return { key: id, result: await getClubForAthlete(id), error: null };
+        } catch (err) {
+          return { key: id, result: null as string | null, error: err instanceof Error ? err.message : String(err) };
+        }
+      })
+    );
+
+    if (ids.length === 1) {
+      const { result, error } = settled[0];
+      if (error) return `Error fetching club for athlete ${ids[0]}: ${error}`;
+      return result!;
+    }
+
+    return settled
+      .map(({ key, result, error }) =>
+        `=== ${key} ===\n${error ? `Error: ${error}` : result!}`
+      )
+      .join('\n\n');
   }
 
   throw new Error(`Unknown athlete tool: ${toolName}`);
