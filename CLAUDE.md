@@ -133,6 +133,10 @@ See `docs/api-endpoints.md` for full data field reference.
 
 ---
 
+## Development Workflow
+
+When a new feature is planned, prefer creating a GitHub issue with the implementation plan rather than implementing directly in the session. Add the `auto` label to issues that are ready for automated implementation. Use the `ready-to-implement` label once the issue has been reviewed and approved.
+
 ## Development Rules
 
 1. **Test scraping with real URLs before committing.** Use `1708821` / `frimleylodge` as baseline.
@@ -144,6 +148,7 @@ See `docs/api-endpoints.md` for full data field reference.
 7. **Handle errors gracefully:** 404 (event/athlete not found), network timeouts, HTML structure changes.
 8. **Be conservative with requests** — cache responses where sensible; don’t hammer the site.
 9. **stdout is reserved for MCP protocol.** Use `process.stderr` for all logging in `src/index.ts`.
+10. **`AthleteHistory.runs` is ordered newest-first** — the parkrun athlete page lists results descending by date. Use `runs[0]` or `runs.find(...)` to get the most recent run.
 
 ---
 
