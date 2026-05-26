@@ -11,18 +11,20 @@ function formatAthleteHistory(
   includeJunior = false
 ): string {
   const filtered = includeJunior ? history.runs : history.runs.filter((r) => !r.isJunior);
-  const runs = limit ? filtered.slice(0, limit) : filtered;
-  const lines = [
-    `Athlete: ${history.name} (ID: ${history.athleteId})`,
-    `Total runs: ${history.totalRuns}`,
-    '',
-    'Recent runs:',
-    ...runs.map(
-      (r) =>
-        `  ${r.date}  ${r.eventName.padEnd(20)}  ${r.time}  Pos ${r.position}${r.isPB ? '  *** PB ***' : ''}`
-    ),
-  ];
-  return lines.join('\n');
+  const runs = (limit ? filtered.slice(0, limit) : filtered).map((r) => ({
+    date: r.date,
+    eventName: r.eventName,
+    eventSlug: r.eventSlug,
+    time: r.time,
+    position: r.position,
+    isPB: r.isPB,
+    runNumber: r.runNumber,
+  }));
+  return JSON.stringify(
+    { athleteName: history.name, athleteId: history.athleteId, totalRuns: history.totalRuns, runs },
+    null,
+    2
+  );
 }
 
 function timeToSeconds(time: string): number {
@@ -39,22 +41,27 @@ function formatPersonalBest(
 ): string {
   const runs = includeJunior ? history.runs : history.runs.filter((r) => !r.isJunior);
   if (runs.length === 0) {
-    return `No runs found for athlete ${history.athleteId}.`;
+    return JSON.stringify({ athleteName: history.name, athleteId: history.athleteId, personalBest: null });
   }
   const best = runs.reduce((a, b) =>
     timeToSeconds(a.time) <= timeToSeconds(b.time) ? a : b
   );
-  const lines = [
-    `Athlete: ${history.name} (ID: ${history.athleteId})`,
-    `Personal best: ${best.time}`,
-    `Event: ${best.eventName}`,
-    `Date: ${best.date}`,
-  ];
-  if (pbContext) {
-    const fieldStr = pbContext.fieldSize > 0 ? ` of ${pbContext.fieldSize} finishers` : '';
-    lines.push(`Position: ${pbContext.position}${fieldStr}`);
-  }
-  return lines.join('\n');
+  return JSON.stringify(
+    {
+      athleteName: history.name,
+      athleteId: history.athleteId,
+      personalBest: {
+        time: best.time,
+        eventName: best.eventName,
+        eventSlug: best.eventSlug,
+        date: best.date,
+        position: pbContext?.position ?? best.position,
+        fieldSize: pbContext?.fieldSize ?? 0,
+      },
+    },
+    null,
+    2
+  );
 }
 
 function formatVolunteerSummary(
