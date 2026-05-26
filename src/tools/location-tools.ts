@@ -3,6 +3,10 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { searchEventByName, findNearestEvents } from '../scraper/location.js';
 import type { ParkrunEvent } from '../types/parkrun.js';
 
+function toArray<T>(v: T | T[]): T[] {
+  return Array.isArray(v) ? v : [v];
+}
+
 function eventPageUrl(slug: string): string {
   return `https://www.parkrun.org.uk/${slug}/`;
 }
@@ -22,19 +26,24 @@ function formatEventLocation(e: ParkrunEvent): string {
   ].join('\n');
 }
 
+const queryOrQueries = {
+  oneOf: [
+    { type: 'string' },
+    { type: 'array', items: { type: 'string' }, minItems: 1 },
+  ],
+  description: 'Event name or partial name to search for (e.g. "frimleylodge", "Bushy", "Wigan"). Accepts a single string or an array of strings for batch lookup.',
+} as const;
+
 export const locationTools: Tool[] = [
   {
     name: 'search_event_location',
     description:
       'Search for a parkrun event by name and retrieve its location coordinates and map URL. ' +
-      'Accepts a partial event name, slug, or location description.',
+      'Accepts a partial event name, slug, or location description. Pass an array to batch-search multiple events.',
     inputSchema: {
       type: 'object',
       properties: {
-        query: {
-          type: 'string',
-          description: 'Event name or partial name to search for (e.g. "frimleylodge", "Bushy", "Wigan").',
-        },
+        query: queryOrQueries,
         includeJunior: {
           type: 'boolean',
           description: 'Include junior parkrun events (2km, Sunday mornings, under-14s) in results. Only set to true when the user explicitly asks about junior parkruns. Defaults to false.',
@@ -83,23 +92,54 @@ export async function handleLocationTool(
   args: Record<string, unknown>
 ): Promise<string> {
   if (toolName === 'search_event_location') {
-    const { query, includeJunior } = z.object({ query: z.string(), includeJunior: z.boolean().optional() }).parse(args);
-    const results = await searchEventByName(query, includeJunior ?? false);
-    if (results.length === 0) {
-      return `No parkrun events found matching "${query}".`;
+    const { query, includeJunior } = z
+      .object({
+        query: z.union([z.string(), z.array(z.string()).min(1)]),
+        includeJunior: z.boolean().optional(),
+      })
+      .parse(args);
+    const queries = toArray(query);
+
+    const settled = await Promise.all(
+      queries.map(async (q) => {
+        try {
+          return { key: q, result: await searchEventByName(q, includeJunior ?? false), error: null };
+        } catch (err) {
+          return { key: q, result: null as ParkrunEvent[] | null, error: err instanceof Error ? err.message : String(err) };
+        }
+      })
+    );
+
+    if (queries.length === 1) {
+      const { result, error } = settled[0];
+      if (error) return `Error searching for "${queries[0]}": ${error}`;
+      const results = result!;
+      if (results.length === 0) return `No parkrun events found matching "${queries[0]}".`;
+      if (results.length === 1) return formatEventLocation(results[0]);
+      const lines = [`Found ${results.length} matching events:\n`];
+      for (const e of results.slice(0, 10)) {
+        lines.push(formatEventLocation(e));
+        lines.push('');
+      }
+      if (results.length > 10) lines.push(`... and ${results.length - 10} more. Refine your search for fewer results.`);
+      return lines.join('\n');
     }
-    if (results.length === 1) {
-      return formatEventLocation(results[0]);
-    }
-    const lines = [`Found ${results.length} matching events:\n`];
-    for (const e of results.slice(0, 10)) {
-      lines.push(formatEventLocation(e));
-      lines.push('');
-    }
-    if (results.length > 10) {
-      lines.push(`... and ${results.length - 10} more. Refine your search for fewer results.`);
-    }
-    return lines.join('\n');
+
+    return settled
+      .map(({ key, result, error }) => {
+        if (error) return `=== ${key} ===\nError: ${error}`;
+        const results = result!;
+        if (results.length === 0) return `=== ${key} ===\nNo parkrun events found matching "${key}".`;
+        if (results.length === 1) return `=== ${key} ===\n${formatEventLocation(results[0])}`;
+        const lines = [`=== ${key} ===\nFound ${results.length} matching events:\n`];
+        for (const e of results.slice(0, 10)) {
+          lines.push(formatEventLocation(e));
+          lines.push('');
+        }
+        if (results.length > 10) lines.push(`... and ${results.length - 10} more.`);
+        return lines.join('\n');
+      })
+      .join('\n\n');
   }
 
   if (toolName === 'get_nearest_events') {
